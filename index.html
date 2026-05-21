@@ -32,6 +32,9 @@
       await OneSignal.init({
         appId: "2d0d556c-b3cd-492a-8690-b37d76424750",
         allowLocalhostAsSecureOrigin: false,
+        // Site is at a subpath (/super-chatpals/), so tell OneSignal where the SW lives
+        serviceWorkerPath: "OneSignalSDKWorker.js",
+        serviceWorkerParam: { scope: "./" },
       });
       console.log('[OneSignal] ready');
     } catch (e) { console.error('[OneSignal] init failed', e); }
