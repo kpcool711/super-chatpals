@@ -2042,6 +2042,31 @@ function whenOneSignalReady(cb) {
   window.OneSignalDeferred.push(cb);
 }
 
+// "Wake up" the push system periodically so iOS doesn't fully sleep it.
+// Calling small OneSignal operations every few minutes keeps it warm.
+let pushKeepaliveTimer = null;
+function startPushKeepalive() {
+  if (pushKeepaliveTimer) clearInterval(pushKeepaliveTimer);
+  pushKeepaliveTimer = setInterval(() => {
+    whenOneSignalReady(async (OneSignal) => {
+      try {
+        // Refresh the session — keeps iOS engaged with the SW
+        if (OneSignal.User && OneSignal.User.PushSubscription) {
+          const optedIn = OneSignal.User.PushSubscription.optedIn;
+          if (optedIn !== pushSubscribed) {
+            pushSubscribed = !!optedIn;
+            renderNotifBtn();
+          }
+        }
+      } catch {}
+    });
+  }, 5 * 60 * 1000); // every 5 minutes
+}
+
+function stopPushKeepalive() {
+  if (pushKeepaliveTimer) { clearInterval(pushKeepaliveTimer); pushKeepaliveTimer = null; }
+}
+
 // Tell OneSignal "this device belongs to <username>" so we can target push
 // at a specific user later, regardless of which device they sign in on.
 async function loginToOneSignal(username) {
@@ -2051,6 +2076,7 @@ async function loginToOneSignal(username) {
       // Refresh push subscription state
       pushSubscribed = !!OneSignal.User.PushSubscription.optedIn;
       renderNotifBtn();
+      startPushKeepalive();
     } catch (e) { console.error('[OneSignal] login failed', e); }
   });
 }
@@ -2058,6 +2084,7 @@ async function loginToOneSignal(username) {
 async function logoutOfOneSignal() {
   whenOneSignalReady(async (OneSignal) => {
     try { await OneSignal.logout(); } catch {}
+    stopPushKeepalive();
   });
 }
 
