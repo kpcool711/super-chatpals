@@ -2103,57 +2103,38 @@ async function requestNotificationPermission() {
   });
 }
 
-// Sends a pop-up push to a specific username's devices via OneSignal REST API.
-// Logs the response so we can see what OneSignal says when it fails.
+// Sends a pop-up push via our Cloudflare Worker backend.
+// The Worker holds the OneSignal REST key safely and bypasses browser CORS limits.
+const PUSH_BACKEND_URL = 'https://chatpals-push.kpcool-711.workers.dev';
+
 async function sendPushTo(username, title, body) {
   if (!username) return;
-  console.log('[OneSignal] sending push to', username, ':', title, '/', body);
+  console.log('[push] sending to', username, ':', title, '/', body);
   try {
-    const res = await fetch('https://onesignal.com/api/v1/notifications', {
+    const res = await fetch(PUSH_BACKEND_URL, {
       method: 'POST',
-      headers: {
-        'Authorization': `Key ${ONESIGNAL_REST_KEY}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        app_id: ONESIGNAL_APP_ID,
-        // Send to external_id using BOTH new + legacy parameter names for safety.
-        include_aliases: { external_id: [username] },
-        include_external_user_ids: [username],
-        target_channel: 'push',
-        channel_for_external_user_ids: 'push',
-        headings: { en: title },
-        contents: { en: body },
+        username,
+        title,
+        body,
         url: 'https://kpcool711.github.io/super-chatpals/',
       }),
     });
     let data;
     try { data = await res.json(); } catch { data = { _status: res.status }; }
-    console.log('[OneSignal] push response status:', res.status, 'body:', data);
+    console.log('[push] response status:', res.status, 'body:', data);
     if (!res.ok || (data && data.errors)) {
       const errMsg = (data && data.errors)
         ? (Array.isArray(data.errors) ? data.errors.join(', ') : JSON.stringify(data.errors))
         : `HTTP ${res.status}`;
-      console.warn('[OneSignal] push failed:', errMsg);
-      // Show a one-time toast for the FIRST error per session so we know it failed
-      if (!sendPushTo._warned) {
-        sendPushTo._warned = true;
-        toast(`Push send failed: ${errMsg}`);
-      }
+      console.warn('[push] failed:', errMsg);
     } else if (data && data.recipients === 0) {
-      console.warn('[OneSignal] push delivered to 0 recipients — external_id mismatch?');
-      if (!sendPushTo._warnedZero) {
-        sendPushTo._warnedZero = true;
-        toast(`Push: 0 recipients for "${username}"`);
-      }
+      console.warn('[push] delivered to 0 recipients — external_id mismatch?');
     }
     return data;
   } catch (e) {
-    console.error('[OneSignal] push fetch failed', e);
-    if (!sendPushTo._warned) {
-      sendPushTo._warned = true;
-      toast('Push: network error');
-    }
+    console.error('[push] fetch failed', e);
   }
 }
 
@@ -3386,8 +3367,15 @@ async function startVoiceCall() {
   const existing = await db.ref(`calls/${state.currentChatId}`).once('value');
   const ec = existing.val();
   if (ec && (ec.status === 'ringing' || ec.status === 'active')) {
-    toast('A call is already happening in this chat');
-    return;
+    const age = Date.now() - (ec.startedAt || 0);
+    // Only treat as "in progress" if the existing call is recent (< 5 min).
+    // Stuck/abandoned calls older than that get auto-cleaned.
+    if (age < 5 * 60 * 1000) {
+      toast('A call is already happening in this chat');
+      return;
+    }
+    console.log('[call] removing stale call record (age:', Math.floor(age/1000), 's)');
+    try { await db.ref(`calls/${state.currentChatId}`).remove(); } catch {}
   }
 
   activeCall = initCallState({
