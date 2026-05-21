@@ -2109,7 +2109,7 @@ async function sendPushTo(username, title, body) {
   if (!username) return;
   console.log('[OneSignal] sending push to', username, ':', title, '/', body);
   try {
-    const res = await fetch('https://api.onesignal.com/notifications', {
+    const res = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
       headers: {
         'Authorization': `Key ${ONESIGNAL_REST_KEY}`,
